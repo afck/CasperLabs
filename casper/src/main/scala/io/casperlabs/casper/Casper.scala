@@ -1,28 +1,20 @@
 package io.casperlabs.casper
 
 import cats.effect.concurrent.Semaphore
-import cats.{Applicative, Monad}
-import cats.implicits._
 import cats.effect.{Concurrent, Sync}
+import cats.implicits._
+import cats.{Applicative, Monad}
 import com.google.protobuf.ByteString
 import io.casperlabs.blockstorage.{BlockDagRepresentation, BlockDagStorage, BlockStore}
 import io.casperlabs.casper.Estimator.Validator
 import io.casperlabs.casper.protocol._
-import io.casperlabs.casper.util._
 import io.casperlabs.casper.util.execengine.ExecEngineUtil.StateHash
-import io.casperlabs.casper.util.rholang._
-import io.casperlabs.catscontrib._
+import io.casperlabs.catscontrib.ski._
 import io.casperlabs.comm.CommError.ErrorHandler
 import io.casperlabs.comm.rp.Connect.{ConnectionsCell, RPConfAsk}
 import io.casperlabs.comm.transport.TransportLayer
 import io.casperlabs.shared._
-import monix.eval.Task
-import monix.execution.Scheduler
-import monix.execution.atomic.AtomicAny
-import io.casperlabs.catscontrib.ski._
 import io.casperlabs.smartcontracts.ExecutionEngineService
-
-import scala.concurrent.SyncVar
 
 trait Casper[F[_], A] {
   def addBlock(
@@ -44,8 +36,6 @@ trait MultiParentCasper[F[_]] extends Casper[F, IndexedSeq[BlockMessage]] {
   def normalizedInitialFault(weights: Map[Validator, Long]): F[Float]
   def lastFinalizedBlock: F[BlockMessage]
   def storageContents(hash: ByteString): F[String]
-  // TODO: Refactor hashSetCasper to take a RuntimeManager[F] just like BlockStore[F]
-  def getRuntimeManager: F[Option[RuntimeManager[F]]]
 }
 
 object MultiParentCasper extends MultiParentCasperInstances {
@@ -63,8 +53,7 @@ object MultiParentCasper extends MultiParentCasperInstances {
 
 sealed abstract class MultiParentCasperInstances {
 
-  def hashSetCasper[
-      F[_]: Concurrent: ConnectionsCell: TransportLayer: Log: Time: ErrorHandler: SafetyOracle: BlockStore: RPConfAsk: BlockDagStorage: ExecutionEngineService](
+  def hashSetCasper[F[_]: Concurrent: ConnectionsCell: TransportLayer: Log: Time: ErrorHandler: SafetyOracle: BlockStore: RPConfAsk: BlockDagStorage: ExecutionEngineService](
       validatorId: Option[ValidatorIdentity],
       genesis: BlockMessage,
       shardId: String
