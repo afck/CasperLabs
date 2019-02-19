@@ -106,7 +106,7 @@ object Genesis {
   ): F[BlockMessage] =
     for {
       wallets   <- getWallets[F](walletsPath)
-      bonds     <- runtimeManager.computeBonds(runtimeManager.emptyStateHash)
+      bonds     <- ExecutionEngineService[F].computeBonds(ExecutionEngineService[F].emptyStateHash)
       bondsMap  = bonds.map(b => b.validator.toByteArray -> b.stake).toMap
       timestamp <- deployTimestamp.fold(Time[F].currentMillis)(_.pure[F])
       initial = withoutContracts(

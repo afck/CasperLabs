@@ -8,10 +8,12 @@ import cats.syntax.either._
 import cats.syntax.functor._
 import cats.{Applicative, Monad}
 import com.google.protobuf.ByteString
+import io.casperlabs.casper.protocol.Bond
 import io.casperlabs.catscontrib.ToAbstractContext
 import io.casperlabs.crypto.codec.Base16
 import io.casperlabs.ipc._
 import io.casperlabs.models.SmartContractEngineError
+import io.casperlabs.shared.Log
 import io.grpc.ManagedChannel
 import io.grpc.netty.NettyChannelBuilder
 import io.netty.channel.epoll.{Epoll, EpollDomainSocketChannel, EpollEventLoopGroup}
@@ -30,11 +32,16 @@ import scala.util.Either
       deploys: Seq[Deploy]
   ): F[Either[Throwable, Seq[DeployResult]]]
   def commit(prestate: ByteString, effects: Seq[TransformEntry]): F[Either[Throwable, ByteString]]
+  def computeBonds(hash: ByteString): F[Seq[Bond]]
   def close(): F[Unit]
 }
 
-class GrpcExecutionEngineService[F[_]: Monad: ToAbstractContext](addr: Path, maxMessageSize: Int)
-    extends ExecutionEngineService[F] {
+class GrpcExecutionEngineService[F[_]: Monad: ToAbstractContext](
+    addr: Path,
+    maxMessageSize: Int,
+    // Pass in the genesis bonds until we have a solution based on the BlockStore.
+    initialBonds: Seq[Bond]
+) extends ExecutionEngineService[F] {
 
   private val channelType =
     if (Epoll.isAvailable) classOf[EpollDomainSocketChannel] else classOf[KQueueDomainSocketChannel]
@@ -103,6 +110,9 @@ class GrpcExecutionEngineService[F[_]: Monad: ToAbstractContext](addr: Path, max
               Left(new SmartContractEngineError(s"Error executing transform: $message"))
           }
       }
+  override def computeBonds(hash: ByteString): F[Seq[Bond]] =
+    // FIXME: Implement bonds!
+    initialBonds.pure[F]
 }
 
 object ExecutionEngineService {
@@ -117,7 +127,8 @@ object ExecutionEngineService {
       override def commit(
           prestate: ByteString,
           effects: Seq[TransformEntry]
-      ): F[Either[Throwable, ByteString]] = ByteString.EMPTY.asRight[Throwable].pure
-      override def close(): F[Unit]       = ().pure
+      ): F[Either[Throwable, ByteString]]                       = ByteString.EMPTY.asRight[Throwable].pure
+      override def close(): F[Unit]                             = ().pure
+      override def computeBonds(hash: ByteString): F[Seq[Bond]] = Seq[Bond]().pure
     }
 }
