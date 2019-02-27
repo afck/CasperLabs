@@ -2,7 +2,6 @@ package io.casperlabs.casper
 
 import com.google.protobuf.ByteString
 import io.casperlabs.casper.protocol._
-import io.casperlabs.casper.util.rholang.RuntimeManager.StateHash
 import io.casperlabs.ipc
 import scalapb.GeneratedMessage
 import io.casperlabs.crypto.codec._

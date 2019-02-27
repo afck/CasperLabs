@@ -9,7 +9,7 @@ import io.casperlabs.casper.ValidatorIdentity
 import io.casperlabs.casper.genesis.Genesis
 import io.casperlabs.casper.genesis.contracts._
 import io.casperlabs.casper.protocol._
-import io.casperlabs.casper.util.rholang.{ProcessedDeployUtil, RuntimeManager}
+import io.casperlabs.casper.util.rholang.ProcessedDeployUtil
 import io.casperlabs.catscontrib.Capture
 import io.casperlabs.catscontrib.Catscontrib._
 import io.casperlabs.comm.CommError.ErrorHandler
@@ -22,6 +22,7 @@ import io.casperlabs.comm.transport.{Blob, TransportLayer}
 import io.casperlabs.crypto.hash.Blake2b256
 import io.casperlabs.models.InternalProcessedDeploy
 import io.casperlabs.shared._
+import io.casperlabs.smartcontracts.ExecutionEngineService
 import monix.eval.Task
 import monix.execution.Scheduler
 
@@ -45,10 +46,9 @@ class BlockApproverProtocol(
   private implicit val logSource: LogSource = LogSource(this.getClass)
   private val _bonds                        = bonds.map(e => ByteString.copyFrom(e._1) -> e._2)
 
-  def unapprovedBlockPacketHandler[F[_]: Concurrent: TransportLayer: Log: Time: ErrorHandler: RPConfAsk](
+  def unapprovedBlockPacketHandler[F[_]: Concurrent: TransportLayer: Log: Time: ErrorHandler: RPConfAsk: ExecutionEngineService](
       peer: PeerNode,
-      u: UnapprovedBlock,
-      runtimeManager: RuntimeManager[F]
+      u: UnapprovedBlock
   ): F[Unit] =
     if (u.candidate.isEmpty) {
       Log[F]
@@ -58,7 +58,6 @@ class BlockApproverProtocol(
       val candidate = u.candidate.get
       BlockApproverProtocol
         .validateCandidate(
-          runtimeManager,
           candidate,
           requiredSigs,
           deployTimestamp,
@@ -104,8 +103,7 @@ object BlockApproverProtocol {
   ): BlockApproval =
     getBlockApproval(candidate, validatorId)
 
-  def validateCandidate[F[_]: Concurrent: Log](
-      runtimeManager: RuntimeManager[F],
+  def validateCandidate[F[_]: Concurrent: Log: ExecutionEngineService](
       candidate: ApprovedBlockCandidate,
       requiredSigs: Int,
       timestamp: Long,

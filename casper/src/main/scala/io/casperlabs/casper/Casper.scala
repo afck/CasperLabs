@@ -9,7 +9,7 @@ import io.casperlabs.blockstorage.{BlockDagRepresentation, BlockDagStorage, Bloc
 import io.casperlabs.casper.Estimator.Validator
 import io.casperlabs.casper.protocol._
 import io.casperlabs.casper.util._
-import io.casperlabs.casper.util.rholang.RuntimeManager.StateHash
+import io.casperlabs.casper.util.execengine.ExecEngineUtil.StateHash
 import io.casperlabs.casper.util.rholang._
 import io.casperlabs.catscontrib._
 import io.casperlabs.comm.CommError.ErrorHandler
@@ -20,6 +20,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 import monix.execution.atomic.AtomicAny
 import io.casperlabs.catscontrib.ski._
+import io.casperlabs.smartcontracts.ExecutionEngineService
 
 import scala.concurrent.SyncVar
 
@@ -62,8 +63,7 @@ object MultiParentCasper extends MultiParentCasperInstances {
 
 sealed abstract class MultiParentCasperInstances {
 
-  def hashSetCasper[F[_]: Concurrent: ConnectionsCell: TransportLayer: Log: Time: ErrorHandler: SafetyOracle: BlockStore: RPConfAsk: BlockDagStorage](
-      runtimeManager: RuntimeManager[F],
+  def hashSetCasper[F[_]: Concurrent: ConnectionsCell: TransportLayer: Log: Time: ErrorHandler: SafetyOracle: BlockStore: RPConfAsk: BlockDagStorage: ExecutionEngineService](
       validatorId: Option[ValidatorIdentity],
       genesis: BlockMessage,
       shardId: String
@@ -98,7 +98,6 @@ sealed abstract class MultiParentCasperInstances {
 
     } yield {
       implicit val state = casperState
-      implicit val ee    = runtimeManager.executionEngineService
       new MultiParentCasperImpl[F](
         validatorId,
         genesis,

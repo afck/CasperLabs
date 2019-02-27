@@ -6,7 +6,7 @@ import cats.implicits._
 import com.google.protobuf.ByteString
 import io.casperlabs.blockstorage.{BlockDagRepresentation, BlockStore}
 import io.casperlabs.casper.protocol._
-import io.casperlabs.casper.util.rholang.RuntimeManager.StateHash
+import io.casperlabs.casper.util.execengine.ExecEngineUtil.StateHash
 import io.casperlabs.casper.util.{DagOperations, ProtoUtil}
 import io.casperlabs.casper.{BlockException, PrettyPrinter}
 import io.casperlabs.crypto.codec.Base16
@@ -22,10 +22,9 @@ object InterpreterUtil {
 
   //Returns (None, checkpoints) if the block's tuplespace hash
   //does not match the computed hash based on the deploys
-  def validateBlockCheckpoint[F[_]: Sync: Log: BlockStore](
+  def validateBlockCheckpoint[F[_]: Sync: Log: BlockStore: ExecutionEngineService](
       b: BlockMessage,
-      dag: BlockDagRepresentation[F],
-      runtimeManager: RuntimeManager[F]
+      dag: BlockDagRepresentation[F]
   ): F[Either[BlockException, Option[StateHash]]] = {
     val preStateHash    = ProtoUtil.preStateHash(b)
     val tsHash          = ProtoUtil.tuplespace(b)
@@ -36,12 +35,10 @@ object InterpreterUtil {
       parents <- ProtoUtil.unsafeGetParents[F](b)
       possiblePreStateHash <- computeParentsPostState[F](
                                parents,
-                               dag,
-                               runtimeManager
+                               dag
                              )
       _ <- Log[F].info(s"Computed parents post state for ${PrettyPrinter.buildString(b)}.")
       result <- processPossiblePreStateHash[F](
-                 runtimeManager,
                  preStateHash,
                  tsHash,
                  internalDeploys,
@@ -51,8 +48,7 @@ object InterpreterUtil {
     } yield result
   }
 
-  private def processPossiblePreStateHash[F[_]: Sync: Log: BlockStore](
-      runtimeManager: RuntimeManager[F],
+  private def processPossiblePreStateHash[F[_]: Sync: Log: BlockStore: ExecutionEngineService](
       preStateHash: StateHash,
       tsHash: Option[StateHash],
       internalDeploys: Seq[InternalProcessedDeploy],
@@ -80,8 +76,7 @@ object InterpreterUtil {
         }
     }
 
-  private def processPreStateHash[F[_]: Monad: Log: BlockStore](
-      runtimeManager: RuntimeManager[F],
+  private def processPreStateHash[F[_]: Monad: Log: BlockStore: ExecutionEngineService](
       preStateHash: StateHash,
       tsHash: Option[StateHash],
       internalDeploys: Seq[InternalProcessedDeploy],
@@ -127,11 +122,10 @@ object InterpreterUtil {
           }
       }
 
-  def computeDeploysCheckpoint[F[_]: Sync: BlockStore: Log](
+  def computeDeploysCheckpoint[F[_]: Sync: BlockStore: Log: ExecutionEngineService](
       parents: Seq[BlockMessage],
       deploysWithEffect: Seq[(Deploy, ExecutionEffect)],
       dag: BlockDagRepresentation[F],
-      runtimeManager: RuntimeManager[F],
       time: Option[Long] = None
   ): F[Either[Throwable, (StateHash, StateHash, Seq[InternalProcessedDeploy])]] =
     for {
@@ -149,7 +143,7 @@ object InterpreterUtil {
             }
     } yield res
 
-  private def computeParentsPostState[F[_]: Sync: BlockStore](
+  private def computeParentsPostState[F[_]: Sync: BlockStore: ExecutionEngineService](
       parents: Seq[BlockMessage],
       dag: BlockDagRepresentation[F],
       runtimeManager: RuntimeManager[F]

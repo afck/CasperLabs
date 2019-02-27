@@ -11,11 +11,13 @@ import io.casperlabs.casper.genesis.contracts._
 import io.casperlabs.casper.protocol._
 import io.casperlabs.casper.util.ProtoUtil.{blockHeader, unsignedBlockProto}
 import io.casperlabs.casper.util.Sorting
-import io.casperlabs.casper.util.rholang.RuntimeManager.StateHash
-import io.casperlabs.casper.util.rholang.{ProcessedDeployUtil, RuntimeManager}
+import io.casperlabs.casper.util.execengine.ExecEngineUtil
+import io.casperlabs.casper.util.execengine.ExecEngineUtil.StateHash
+import io.casperlabs.casper.util.rholang.ProcessedDeployUtil
 import io.casperlabs.crypto.codec.Base16
 import io.casperlabs.crypto.signatures.Ed25519
 import io.casperlabs.shared.{Log, LogSource, Time}
+import io.casperlabs.smartcontracts.ExecutionEngineService
 
 import scala.io.Source
 import scala.util.{Failure, Success, Try}
@@ -33,27 +35,24 @@ object Genesis {
   ): List[Deploy] =
     List()
 
-  def withContracts[F[_]: Concurrent: Log](
+  def withContracts[F[_]: Concurrent: Log: ExecutionEngineService](
       initial: BlockMessage,
       posParams: ProofOfStakeParams,
       wallets: Seq[PreWallet],
       faucetCode: String => String,
       startHash: StateHash,
-      runtimeManager: RuntimeManager[F],
       timestamp: Long
   ): F[BlockMessage] =
     withContracts(
       defaultBlessedTerms(timestamp, posParams, wallets, faucetCode),
       initial,
-      startHash,
-      runtimeManager
+      startHash
     )
 
-  def withContracts[F[_]: Concurrent: Log](
+  def withContracts[F[_]: Concurrent: Log: ExecutionEngineService](
       blessedTerms: List[Deploy],
       initial: BlockMessage,
-      startHash: StateHash,
-      runtimeManager: RuntimeManager[F]
+      startHash: StateHash
   ): F[BlockMessage] =
     runtimeManager
       .computeState(startHash, Seq.empty)
@@ -97,12 +96,11 @@ object Genesis {
   }
 
   //TODO: Decide on version number and shard identifier
-  def apply[F[_]: Concurrent: Log: Time](
+  def apply[F[_]: Concurrent: Log: Time: ExecutionEngineService](
       walletsPath: Path,
       minimumBond: Long,
       maximumBond: Long,
       faucet: Boolean,
-      runtimeManager: RuntimeManager[F],
       shardId: String,
       deployTimestamp: Option[Long]
   ): F[BlockMessage] =
@@ -124,8 +122,7 @@ object Genesis {
                     ProofOfStakeParams(minimumBond, maximumBond, validators),
                     wallets,
                     faucetCode,
-                    runtimeManager.emptyStateHash,
-                    runtimeManager,
+                    ExecutionEngineService[F].emptyStateHash,
                     timestamp
                   )
     } yield withContr
