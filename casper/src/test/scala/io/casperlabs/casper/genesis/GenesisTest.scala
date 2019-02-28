@@ -11,7 +11,6 @@ import io.casperlabs.catscontrib.TaskContrib._
 import io.casperlabs.casper.helper.BlockDagStorageFixture
 import io.casperlabs.casper.protocol.{BlockMessage, Bond}
 import io.casperlabs.casper.util.ProtoUtil
-import io.casperlabs.casper.util.rholang.{InterpreterUtil, RuntimeManager}
 import io.casperlabs.catscontrib._
 import io.casperlabs.crypto.codec.Base16
 import io.casperlabs.p2p.EffectsTestInstances.{LogStub, LogicalTime}
@@ -169,10 +168,7 @@ class GenesisTest extends FlatSpec with Matchers with BlockDagStorageFixture {
             maybePostGenesisStateHash <- InterpreterUtil
                                           .validateBlockCheckpoint[Task](
                                             genesis,
-                                            dag,
-                                            RuntimeManager.fromExecutionEngineService(
-                                              executionEngineService
-                                            )
+                                            dag
                                           )
           } yield maybePostGenesisStateHash should matchPattern { case Right(Some(_)) => }
       }
@@ -220,14 +216,12 @@ object GenesisTest {
       time: LogicalTime[Task]
   ): Task[BlockMessage] =
     for {
-      bonds          <- Genesis.getBonds[Task](genesisPath, bondsPath, numValidators)
-      runtimeManager = RuntimeManager[Task](executionEngineService, bonds)
+      bonds <- Genesis.getBonds[Task](genesisPath, bondsPath, numValidators)
       genesis <- Genesis[Task](
                   walletsPath = nonExistentPath,
                   minimumBond = 1L,
                   maximumBond = Long.MaxValue,
                   faucet = false,
-                  runtimeManager,
                   shardId = casperlabsShardId,
                   deployTimestamp = Some(System.currentTimeMillis)
                 )

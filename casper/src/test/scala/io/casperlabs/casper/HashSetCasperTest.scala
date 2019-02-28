@@ -12,7 +12,6 @@ import io.casperlabs.casper.helper.HashSetCasperTestNode.Effect
 import io.casperlabs.casper.helper.{BlockDagStorageTestFixture, BlockUtil, HashSetCasperTestNode}
 import io.casperlabs.casper.protocol._
 import io.casperlabs.casper.scalatestcontrib._
-import io.casperlabs.casper.util.rholang.RuntimeManager
 import io.casperlabs.casper.util.{BondingUtil, ProtoUtil}
 import io.casperlabs.catscontrib.TaskContrib.TaskOps
 import io.casperlabs.comm.rp.ProtocolHelper.packet
@@ -396,11 +395,10 @@ class HashSetCasperTest extends FlatSpec with Matchers {
     val node = HashSetCasperTestNode.standaloneEff(genesis, validatorKeys.head)
     import node.{casperEff, logEff}
 
-    implicit val runtimeManager = node.runtimeManager
-    val (sk, pk)                = Ed25519.newKeyPair
-    val pkStr                   = Base16.encode(pk)
-    val amount                  = 314L
-    val forwardCode             = BondingUtil.bondingForwarderDeploy(pkStr, pkStr)
+    val (sk, pk)    = Ed25519.newKeyPair
+    val pkStr       = Base16.encode(pk)
+    val amount      = 314L
+    val forwardCode = BondingUtil.bondingForwarderDeploy(pkStr, pkStr)
     for {
       bondingCode <- BondingUtil.faucetBondDeploy[Effect](amount, "ed25519", pkStr, sk)
       forwardDeploy = ProtoUtil.sourceDeploy(
@@ -442,13 +440,11 @@ class HashSetCasperTest extends FlatSpec with Matchers {
     for {
       nodes <- HashSetCasperTestNode.networkEff(localValidators, localGenesis)
 
-      rm          = nodes.head.runtimeManager
       (sk, pk)    = Ed25519.newKeyPair
       pkStr       = Base16.encode(pk)
       forwardCode = BondingUtil.bondingForwarderDeploy(pkStr, pkStr)
       bondingCode <- BondingUtil.faucetBondDeploy[Effect](50, "ed25519", pkStr, sk)(
-                      Sync[Effect],
-                      rm
+                      Sync[Effect]
                     )
       forwardDeploy = ProtoUtil.sourceDeploy(
         forwardCode,
@@ -1114,12 +1110,11 @@ object HashSetCasperTest {
       faucetCode: String => String,
       deployTimestamp: Long
   ): BlockMessage = {
-    implicit val logEff         = new LogStub[Task]()
-    val initial                 = Genesis.withoutContracts(bonds, 1L, deployTimestamp, "casperlabs")
-    val casperSmartContractsApi = HashSetCasperTestNode.simpleEEApi[Task]()
-    val runtimeManager          = RuntimeManager.fromExecutionEngineService(casperSmartContractsApi)
-    val emptyStateHash          = casperSmartContractsApi.emptyStateHash
-    val validators              = bonds.map(bond => ProofOfStakeValidator(bond._1, bond._2)).toSeq
+    implicit val logEff                  = new LogStub[Task]()
+    val initial                          = Genesis.withoutContracts(bonds, 1L, deployTimestamp, "casperlabs")
+    implicit val casperSmartContractsApi = HashSetCasperTestNode.simpleEEApi[Task]()
+    val emptyStateHash                   = casperSmartContractsApi.emptyStateHash
+    val validators                       = bonds.map(bond => ProofOfStakeValidator(bond._1, bond._2)).toSeq
     val genesis = Genesis
       .withContracts(
         initial,
@@ -1127,7 +1122,6 @@ object HashSetCasperTest {
         wallets,
         faucetCode,
         emptyStateHash,
-        runtimeManager,
         deployTimestamp
       )
       .unsafeRunSync

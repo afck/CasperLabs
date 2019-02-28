@@ -20,7 +20,6 @@ import io.casperlabs.casper.util.comm.CasperPacketHandler.{
   StandaloneCasperHandler
 }
 import io.casperlabs.casper.util.comm.CasperPacketHandlerSpec._
-import io.casperlabs.casper.util.rholang.RuntimeManager
 import io.casperlabs.catscontrib.TaskContrib._
 import io.casperlabs.catscontrib.{ApplicativeError_, Capture}
 import io.casperlabs.comm.protocol.routing.Packet
@@ -57,8 +56,7 @@ class CasperPacketHandlerSpec extends WordSpec with Matchers {
     val validatorId                = ValidatorIdentity(validatorPk, validatorSk, "ed25519")
     val storageSize: Long          = 1024L * 1024
 
-    val casperSmartContractsApi = ExecutionEngineService.noOpApi[Task]()
-    val runtimeManager          = RuntimeManager(casperSmartContractsApi, bonds)
+    implicit val casperSmartContractsApi = ExecutionEngineService.noOpApi[Task]()
 
     val bap = new BlockApproverProtocol(
       validatorId,
@@ -116,7 +114,7 @@ class CasperPacketHandlerSpec extends WordSpec with Matchers {
 
         val ref =
           Ref.unsafe[Task, CasperPacketHandlerInternal[Task]](
-            new GenesisValidatorHandler(runtimeManager, validatorId, shardId, bap)
+            new GenesisValidatorHandler(validatorId, shardId, bap)
           )
         val packetHandler     = new CasperPacketHandlerImpl[Task](ref)
         val expectedCandidate = ApprovedBlockCandidate(Some(genesis), requiredSigs)
@@ -148,7 +146,7 @@ class CasperPacketHandlerSpec extends WordSpec with Matchers {
 
         val ref =
           Ref.unsafe[Task, CasperPacketHandlerInternal[Task]](
-            new GenesisValidatorHandler(runtimeManager, validatorId, shardId, bap)
+            new GenesisValidatorHandler(validatorId, shardId, bap)
           )
         val packetHandler = new CasperPacketHandlerImpl[Task](ref)
 
@@ -213,7 +211,6 @@ class CasperPacketHandlerSpec extends WordSpec with Matchers {
             .approveBlockInterval(
               interval,
               shardId,
-              runtimeManager,
               Some(validatorId),
               refCasper
             )
@@ -260,7 +257,6 @@ class CasperPacketHandlerSpec extends WordSpec with Matchers {
         // interval and duration don't really matter since we don't require and signs from validators
         val bootstrapCasper =
           new BootstrapCasperHandler[Task](
-            runtimeManager,
             shardId,
             Some(validatorId),
             validators

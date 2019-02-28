@@ -11,7 +11,6 @@ import io.casperlabs.casper.helper.{BlockDagStorageFixture, BlockGenerator}
 import io.casperlabs.casper.helper.BlockGenerator._
 import io.casperlabs.casper.protocol._
 import io.casperlabs.casper.util.ProtoUtil
-import io.casperlabs.casper.util.rholang.{InterpreterUtil, RuntimeManager}
 import io.casperlabs.catscontrib.ToAbstractContext
 import io.casperlabs.crypto.codec.Base16
 import io.casperlabs.crypto.signatures.Ed25519
@@ -19,7 +18,6 @@ import io.casperlabs.p2p.EffectsTestInstances.LogStub
 import io.casperlabs.shared.Time
 import io.casperlabs.casper.scalatestcontrib._
 import io.casperlabs.casper.helper.BlockUtil.generateValidator
-import io.casperlabs.casper.util.rholang.Resources.mkRuntimeManager
 import io.casperlabs.smartcontracts.ExecutionEngineService
 import monix.eval.Task
 import monix.execution.Scheduler.Implicits.global
@@ -584,14 +582,13 @@ class ValidateTest
       val genesis         = HashSetCasperTest.createGenesis(bonds)
       val genesisBonds    = ProtoUtil.bonds(genesis)
 
-      val storageDirectory        = Files.createTempDirectory(s"hash-set-casper-test-genesis")
-      val storageSize: Long       = 1024L * 1024
-      val casperSmartContractsApi = ExecutionEngineService.noOpApi[Task]()
-      val runtimeManager          = RuntimeManager[Task](casperSmartContractsApi, bonds)
-      implicit val log            = new LogStub[Task]
+      val storageDirectory                 = Files.createTempDirectory(s"hash-set-casper-test-genesis")
+      val storageSize: Long                = 1024L * 1024
+      implicit val casperSmartContractsApi = ExecutionEngineService.noOpApi[Task]()
+      implicit val log                     = new LogStub[Task]
       for {
         dag               <- blockDagStorage.getRepresentation
-        _                 <- InterpreterUtil.validateBlockCheckpoint[Task](genesis, dag, runtimeManager)
+        _                 <- InterpreterUtil.validateBlockCheckpoint[Task](genesis, dag)
         _                 <- Validate.bondsCache[Task](genesis, genesisBonds) shouldBeF Unit
         modifiedBonds     = Seq.empty[Bond]
         modifiedPostState = genesis.getBody.getState.withBonds(modifiedBonds)

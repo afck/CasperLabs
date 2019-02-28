@@ -20,7 +20,6 @@ import io.casperlabs.casper.util.comm.CasperPacketHandler.{
   CasperPacketHandlerInternal
 }
 import io.casperlabs.casper.util.comm.TransportLayerTestImpl
-import io.casperlabs.casper.util.rholang.{InterpreterUtil, RuntimeManager}
 import io.casperlabs.catscontrib._
 import io.casperlabs.catscontrib.TaskContrib._
 import io.casperlabs.catscontrib.effect.implicits._
@@ -79,13 +78,12 @@ class HashSetCasperTestNode[F[_]](
   implicit val cliqueOracleEffect = SafetyOracle.cliqueOracle[F]
   implicit val rpConfAsk          = createRPConfAsk[F](local)
 
-  val casperSmartContractsApi = HashSetCasperTestNode.simpleEEApi[F]()
+  implicit val casperSmartContractsApi = HashSetCasperTestNode.simpleEEApi[F]()
 
   val bonds = genesis.body
     .flatMap(_.state.map(_.bonds.map(b => b.validator.toByteArray -> b.stake).toMap))
     .getOrElse(Map.empty)
 
-  val runtimeManager = RuntimeManager(casperSmartContractsApi, bonds)
   val defaultTimeout = FiniteDuration(1000, MILLISECONDS)
 
   val validatorId = ValidatorIdentity(Ed25519.toPublic(sk), sk, "ed25519")
@@ -95,7 +93,6 @@ class HashSetCasperTestNode[F[_]](
   implicit val labF        = LastApprovedBlock.unsafe[F](Some(approvedBlock))
   val postGenesisStateHash = ProtoUtil.postStateHash(genesis)
 
-  implicit val ee = runtimeManager.executionEngineService
   implicit val casperEff = new MultiParentCasperImpl[F](
     Some(validatorId),
     genesis,
@@ -121,8 +118,7 @@ class HashSetCasperTestNode[F[_]](
         InterpreterUtil
           .validateBlockCheckpoint[F](
             genesis,
-            dag,
-            runtimeManager
+            dag
           )
           .void
       }
