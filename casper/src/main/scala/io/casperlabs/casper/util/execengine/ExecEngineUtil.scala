@@ -5,13 +5,13 @@ import cats.effect.Sync
 import cats.implicits._
 import com.google.protobuf.ByteString
 import io.casperlabs.blockstorage.{BlockDagRepresentation, BlockStore}
-import io.casperlabs.casper.{protocol, PrettyPrinter}
+import io.casperlabs.casper.{protocol, BlockException, PrettyPrinter}
 import io.casperlabs.casper.protocol.{BlockMessage, Bond, ProcessedDeploy}
 import io.casperlabs.casper.util.ProtoUtil.blockNumber
 import io.casperlabs.casper.util.{DagOperations, ProtoUtil}
 import io.casperlabs.ipc
 import io.casperlabs.ipc._
-import io.casperlabs.models.BlockMetadata
+import io.casperlabs.models.{DeployResult => _, _}
 import io.casperlabs.shared.Log
 import io.casperlabs.smartcontracts.ExecutionEngineService
 
@@ -42,6 +42,98 @@ object ExecEngineUtil {
           nonce
         )
     }
+
+  //Returns (None, checkpoints) if the block's tuplespace hash
+  //does not match the computed hash based on the deploys
+  def validateBlockCheckpoint[F[_]: Sync: Log: BlockStore: ExecutionEngineService](
+      b: BlockMessage,
+      dag: BlockDagRepresentation[F],
+      //TODO: this parameter should not be needed because the BlockDagRepresentation could hold this info
+      transform: BlockMetadata => F[Seq[TransformEntry]]
+  ): F[Either[BlockException, Option[StateHash]]] = {
+    val preStateHash = ProtoUtil.preStateHash(b)
+    val tsHash       = ProtoUtil.tuplespace(b)
+    val deploys      = ProtoUtil.deploys(b).flatMap(_.deploy)
+    val timestamp    = Some(b.header.get.timestamp) // TODO: Ensure header exists through type
+    for {
+      parents                              <- ProtoUtil.unsafeGetParents[F](b)
+      processedHash                        <- processDeploys(parents, dag, deploys, transform)
+      (computePreStateHash, deployResults) = processedHash
+      _                                    <- Log[F].info(s"Computed parents post state for ${PrettyPrinter.buildString(b)}.")
+      result <- processPossiblePreStateHash[F](
+                 preStateHash,
+                 tsHash,
+                 deployResults,
+                 computePreStateHash,
+                 timestamp,
+                 deploys
+               )
+    } yield result
+  }
+
+  private def processPossiblePreStateHash[F[_]: Sync: Log: BlockStore: ExecutionEngineService](
+      preStateHash: StateHash,
+      tsHash: Option[StateHash],
+      deployResults: Seq[DeployResult],
+      computedPreStateHash: StateHash,
+      time: Option[Long],
+      deploys: Seq[protocol.Deploy]
+  ): F[Either[BlockException, Option[StateHash]]] =
+    if (preStateHash == computedPreStateHash) {
+      processPreStateHash[F](
+        preStateHash,
+        tsHash,
+        deployResults,
+        computedPreStateHash,
+        time,
+        deploys
+      )
+    } else {
+      Log[F].warn(
+        s"Computed pre-state hash ${PrettyPrinter.buildString(computedPreStateHash)} does not equal block's pre-state hash ${PrettyPrinter
+          .buildString(preStateHash)}"
+      ) *> Right(none[StateHash]).leftCast[BlockException].pure[F]
+    }
+
+  private def processPreStateHash[F[_]: Sync: Log: BlockStore: ExecutionEngineService](
+      preStateHash: StateHash,
+      tsHash: Option[StateHash],
+      processedDeploys: Seq[DeployResult],
+      possiblePreStateHash: StateHash,
+      time: Option[Long],
+      deploys: Seq[protocol.Deploy]
+  ): F[Either[BlockException, Option[StateHash]]] = {
+    val deployLookup     = processedDeploys.zip(deploys).toMap
+    val commutingEffects = findCommutingEffects(processedDeploys)
+    val deploysForBlock = commutingEffects.map(eff => {
+      val deploy = deployLookup(ipc.DeployResult(ipc.DeployResult.Result.Effects(eff)))
+      protocol.ProcessedDeploy(
+        Some(deploy),
+        eff.cost,
+        false
+      )
+    })
+    val transforms = commutingEffects.flatMap(_.transformMap)
+    ExecutionEngineService[F].commit(preStateHash, transforms).flatMap {
+      case Left(ex) =>
+        Log[F].warn(s"Found unknown failure") *> Right(none[StateHash])
+          .leftCast[BlockException]
+          .pure[F]
+      case Right(computedStateHash) =>
+        if (tsHash.contains(computedStateHash)) {
+          //state hash in block matches computed hash!
+          Right(Option(computedStateHash))
+            .leftCast[BlockException]
+            .pure[F]
+        } else {
+          // state hash in block does not match computed hash -- invalid!
+          // return no state hash, do not update the state hash set
+          Log[F].warn(
+            s"Tuplespace hash ${tsHash.getOrElse(ByteString.EMPTY)} does not match computed hash $computedStateHash."
+          ) *> Right(none[StateHash]).leftCast[BlockException].pure[F]
+        }
+    }
+  }
 
   def computeDeploysCheckpoint[F[_]: Sync: Log: ExecutionEngineService](
       parents: Seq[BlockMessage],
