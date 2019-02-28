@@ -16,6 +16,8 @@ import io.casperlabs.casper.util.execengine.ExecEngineUtil.StateHash
 import io.casperlabs.casper.util.rholang.ProcessedDeployUtil
 import io.casperlabs.crypto.codec.Base16
 import io.casperlabs.crypto.signatures.Ed25519
+import io.casperlabs.ipc
+import io.casperlabs.models.BlockMetadata
 import io.casperlabs.shared.{Log, LogSource, Time}
 import io.casperlabs.smartcontracts.ExecutionEngineService
 
@@ -54,20 +56,25 @@ object Genesis {
       initial: BlockMessage,
       startHash: StateHash
   ): F[BlockMessage] =
-    runtimeManager
-      .computeState(startHash, Seq.empty)
+    ExecEngineUtil
+      .computeState(
+        Seq(),
+        null,
+        Seq.empty,
+        (b: BlockMetadata) => Seq.empty[ipc.TransformEntry].pure[F]
+      )
       .map {
-        case (stateHash, processedDeploys) =>
+        case (_, stateHash, blockDeploys: Seq[ProcessedDeploy], number) =>
           val stateWithContracts = for {
             bd <- initial.body
             ps <- bd.state
-          } yield ps.withPreStateHash(runtimeManager.emptyStateHash).withPostStateHash(stateHash)
+          } yield
+            ps.withPreStateHash(ExecutionEngineService[F].emptyStateHash)
+              .withPostStateHash(stateHash)
           val version   = initial.header.get.version
           val timestamp = initial.header.get.timestamp
-          val blockDeploys =
-            processedDeploys.filterNot(_.result.isFailed).map(ProcessedDeployUtil.fromInternal)
-          val body   = Body(state = stateWithContracts, deploys = blockDeploys)
-          val header = blockHeader(body, List.empty[ByteString], version, timestamp)
+          val body      = Body(state = stateWithContracts, deploys = blockDeploys)
+          val header    = blockHeader(body, List.empty[ByteString], version, timestamp)
           unsignedBlockProto(body, header, List.empty[Justification], initial.shardId)
       }
 
@@ -106,7 +113,7 @@ object Genesis {
   ): F[BlockMessage] =
     for {
       wallets   <- getWallets[F](walletsPath)
-      bonds     <- ExecutionEngineService[F].computeBonds(ExecutionEngineService[F].emptyStateHash)
+      bonds     <- ExecEngineUtil.computeBonds[F](ExecutionEngineService[F].emptyStateHash)
       bondsMap  = bonds.map(b => b.validator.toByteArray -> b.stake).toMap
       timestamp <- deployTimestamp.fold(Time[F].currentMillis)(_.pure[F])
       initial = withoutContracts(

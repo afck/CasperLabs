@@ -8,7 +8,6 @@ import io.casperlabs.blockstorage.{BlockDagRepresentation, BlockStore, IndexedBl
 import io.casperlabs.casper.Estimator.{BlockHash, Validator}
 import io.casperlabs.casper.protocol._
 import io.casperlabs.casper.util.ProtoUtil
-import io.casperlabs.casper.util.rholang.RuntimeManager.StateHash
 import io.casperlabs.casper.util.rholang.{InterpreterUtil, ProcessedDeployUtil, RuntimeManager}
 import io.casperlabs.catscontrib._
 import io.casperlabs.crypto.hash.Blake2b256
@@ -24,7 +23,8 @@ import scala.language.higherKinds
 object BlockGenerator {
   implicit val timeEff = new LogicalTime[Task]()
 
-  def updateChainWithBlockStateUpdate[F[_]: Sync: BlockStore: IndexedBlockDagStorage: ExecutionEngineService: Log](
+  def updateChainWithBlockStateUpdate[
+      F[_]: Sync: BlockStore: IndexedBlockDagStorage: ExecutionEngineService: Log](
       id: Int,
       genesis: BlockMessage,
       runtimeManager: RuntimeManager[F]

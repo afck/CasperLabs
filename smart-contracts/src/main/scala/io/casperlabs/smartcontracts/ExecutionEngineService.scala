@@ -32,15 +32,12 @@ import scala.util.Either
       deploys: Seq[Deploy]
   ): F[Either[Throwable, Seq[DeployResult]]]
   def commit(prestate: ByteString, effects: Seq[TransformEntry]): F[Either[Throwable, ByteString]]
-  def computeBonds(hash: ByteString): F[Seq[Bond]]
   def close(): F[Unit]
 }
 
 class GrpcExecutionEngineService[F[_]: Monad: ToAbstractContext](
     addr: Path,
-    maxMessageSize: Int,
-    // Pass in the genesis bonds until we have a solution based on the BlockStore.
-    initialBonds: Seq[Bond]
+    maxMessageSize: Int
 ) extends ExecutionEngineService[F] {
 
   private val channelType =
@@ -110,9 +107,6 @@ class GrpcExecutionEngineService[F[_]: Monad: ToAbstractContext](
               Left(new SmartContractEngineError(s"Error executing transform: $message"))
           }
       }
-  override def computeBonds(hash: ByteString): F[Seq[Bond]] =
-    // FIXME: Implement bonds!
-    initialBonds.pure[F]
 }
 
 object ExecutionEngineService {
@@ -127,8 +121,7 @@ object ExecutionEngineService {
       override def commit(
           prestate: ByteString,
           effects: Seq[TransformEntry]
-      ): F[Either[Throwable, ByteString]]                       = ByteString.EMPTY.asRight[Throwable].pure
-      override def close(): F[Unit]                             = ().pure
-      override def computeBonds(hash: ByteString): F[Seq[Bond]] = Seq[Bond]().pure
+      ): F[Either[Throwable, ByteString]] = ByteString.EMPTY.asRight[Throwable].pure
+      override def close(): F[Unit]       = ().pure
     }
 }

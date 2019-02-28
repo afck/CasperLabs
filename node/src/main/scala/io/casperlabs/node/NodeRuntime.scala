@@ -13,7 +13,6 @@ import io.casperlabs.casper.MultiParentCasperRef.MultiParentCasperRef
 import io.casperlabs.casper._
 import io.casperlabs.casper.protocol.BlockMessage
 import io.casperlabs.casper.util.comm.CasperPacketHandler
-import io.casperlabs.casper.util.rholang.RuntimeManager
 import io.casperlabs.catscontrib.Catscontrib._
 import io.casperlabs.catscontrib.TaskContrib._
 import io.casperlabs.catscontrib._
@@ -150,7 +149,6 @@ class NodeRuntime private[node] (
                             .of[Effect](
                               conf.casper,
                               defaultTimeout,
-                              executionEngineService,
                               _.value
                             )(
                               labEff,
@@ -168,6 +166,7 @@ class NodeRuntime private[node] (
                               Log.eitherTLog(Monad[Task], log),
                               multiParentCasperRef,
                               blockDagStorage,
+                              executionEngineService,
                               scheduler
                             )
     packetHandler = PacketHandler.pf[Effect](casperPacketHandler.handle)(

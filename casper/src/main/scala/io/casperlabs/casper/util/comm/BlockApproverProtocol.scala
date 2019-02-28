@@ -9,6 +9,8 @@ import io.casperlabs.casper.ValidatorIdentity
 import io.casperlabs.casper.genesis.Genesis
 import io.casperlabs.casper.genesis.contracts._
 import io.casperlabs.casper.protocol._
+import io.casperlabs.casper.util.execengine.ExecEngineUtil
+import io.casperlabs.casper.util.execengine.ExecEngineUtil.StateHash
 import io.casperlabs.casper.util.rholang.ProcessedDeployUtil
 import io.casperlabs.catscontrib.Capture
 import io.casperlabs.catscontrib.Catscontrib._
@@ -20,6 +22,7 @@ import io.casperlabs.comm.{transport, PeerNode}
 import io.casperlabs.comm.transport
 import io.casperlabs.comm.transport.{Blob, TransportLayer}
 import io.casperlabs.crypto.hash.Blake2b256
+import io.casperlabs.ipc.TransformEntry
 import io.casperlabs.models.InternalProcessedDeploy
 import io.casperlabs.shared._
 import io.casperlabs.smartcontracts.ExecutionEngineService
@@ -149,18 +152,26 @@ object BlockApproverProtocol {
       result                    <- EitherT(validate.pure[F])
       (blockDeploys, postState) = result
       stateHash <- EitherT(
-                    runtimeManager
-                      .replayComputeState(runtimeManager.emptyStateHash, blockDeploys)
-                  ).leftMap { case (_, status) => s"Failed status during replay: $status." }
+                    ExecEngineUtil
+                      .computeState(
+                        Seq(),
+                        null,
+                        blockDeploys.map(_.deploy),
+                        blockMetada => Seq.empty[TransformEntry].pure[F]
+                      )
+                      .map(_.asRight[String])
+                  )
       _ <- EitherT(
-            (stateHash == postState.postStateHash)
+            (stateHash._2 == postState.postStateHash)
               .either(())
               .or("Tuplespace hash mismatch.")
               .pure[F]
           )
       tuplespaceBonds <- EitherT(
                           Concurrent[F]
-                            .attempt(runtimeManager.computeBonds(postState.postStateHash))
+                            .attempt(
+                              ExecEngineUtil.computeBonds[F](postState.postStateHash)
+                            )
                         ).leftMap(_.getMessage)
       tuplespaceBondsMap = tuplespaceBonds.map {
         case Bond(validator, stake) => validator -> stake
