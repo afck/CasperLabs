@@ -47,8 +47,7 @@ final case class CasperState(
       Map.empty[BlockHash, Seq[ipc.TransformEntry]]
 )
 
-class MultiParentCasperImpl[
-    F[_]: Sync: ConnectionsCell: TransportLayer: Log: Time: ErrorHandler: SafetyOracle: BlockStore: RPConfAsk: BlockDagStorage: ExecutionEngineService](
+class MultiParentCasperImpl[F[_]: Sync: ConnectionsCell: TransportLayer: Log: Time: ErrorHandler: SafetyOracle: BlockStore: RPConfAsk: BlockDagStorage: ExecutionEngineService](
     validatorId: Option[ValidatorIdentity],
     genesis: BlockMessage,
     postGenesisStateHash: StateHash,
@@ -323,35 +322,11 @@ class MultiParentCasperImpl[
       //temporary function for getting transforms for blocks
       f = (b: BlockMetadata) =>
         s.transforms.getOrElse(b.blockHash, Seq.empty[ipc.TransformEntry]).pure[F]
-      processedHash <- ExecEngineUtil.processDeploys(
-                        p,
-                        dag,
-                        r,
-                        f
-                      )
-      (preStateHash, processedDeploys) = processedHash
-      deployLookup                     = processedDeploys.zip(r).toMap
-      commutingEffects                 = ExecEngineUtil.findCommutingEffects(processedDeploys)
-      deploysForBlock = commutingEffects.map(eff => {
-        val deploy = deployLookup(ipc.DeployResult(ipc.DeployResult.Result.Effects(eff)))
-        protocol.ProcessedDeploy(
-          Some(deploy),
-          eff.cost,
-          false
-        )
-      })
-      maxBlockNumber = p.foldLeft(-1L) {
-        case (acc, b) => math.max(acc, blockNumber(b))
-      }
+      stateResult <- ExecEngineUtil
+                      .computeDeploysCheckpoint(p, r, dag, f)
+      (preStateHash, postStateHash, deploysForBlock, number) = stateResult
       //TODO: compute bonds properly
-      newBonds              = ProtoUtil.bonds(p.head)
-      transforms            = commutingEffects.flatMap(_.transformMap)
-      possiblePostStateHash <- ExecutionEngineService[F].commit(preStateHash, transforms)
-      postStateHash <- possiblePostStateHash match {
-                        case Left(ex)    => Sync[F].raiseError(ex)
-                        case Right(hash) => hash.pure[F]
-                      }
-      number = maxBlockNumber + 1
+      newBonds = ProtoUtil.bonds(p.head)
       postState = RChainState()
         .withPreStateHash(preStateHash)
         .withPostStateHash(postStateHash)
@@ -363,16 +338,6 @@ class MultiParentCasperImpl[
         .withDeploys(deploysForBlock)
       header = blockHeader(body, p.map(_.blockHash), version, now)
       block  = unsignedBlockProto(body, header, justifications, shardId)
-
-      msgBody = transforms
-        .map(t => {
-          val k    = PrettyPrinter.buildString(t.key.get)
-          val tStr = PrettyPrinter.buildString(t.transform.get)
-          s"$k :: $tStr"
-        })
-        .mkString("\n")
-      _ <- Log[F]
-            .info(s"Block #$number created with effects:\n$msgBody")
     } yield CreateBlockStatus.created(block)).handleErrorWith(
       ex =>
         Log[F]
@@ -423,7 +388,7 @@ class MultiParentCasperImpl[
         Sync[F].delay(
           s.transforms
             .getOrElse(b.blockHash, Seq.empty[ipc.TransformEntry])
-      )
+        )
       processedHash <- ExecEngineUtil
                         .effectsForBlock(b, dag, f)
                         .recoverWith {
@@ -587,7 +552,7 @@ class MultiParentCasperImpl[
         s.copy(
           dependencyDag = DoublyLinkedDagOperations
             .add[BlockHash](s.dependencyDag, hash, childBlock.blockHash)
-      )
+        )
     )
 
   private def requestMissingDependency(hash: BlockHash) =
