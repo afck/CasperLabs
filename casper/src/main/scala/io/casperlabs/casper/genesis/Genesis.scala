@@ -57,10 +57,10 @@ object Genesis {
       startHash: StateHash
   ): F[BlockMessage] =
     ExecEngineUtil
-      .computeState(
+      .computeDeploysCheckpoint(
         Seq(),
-        null,
         Seq.empty,
+        null,
         (b: BlockMetadata) => Seq.empty[ipc.TransformEntry].pure[F]
       )
       .map {

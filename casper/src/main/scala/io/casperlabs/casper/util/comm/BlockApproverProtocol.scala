@@ -153,10 +153,10 @@ object BlockApproverProtocol {
       (blockDeploys, postState) = result
       stateHash <- EitherT(
                     ExecEngineUtil
-                      .computeState(
+                      .computeDeploysCheckpoint(
                         Seq(),
-                        null,
                         blockDeploys.map(_.deploy),
+                        null,
                         blockMetada => Seq.empty[TransformEntry].pure[F]
                       )
                       .map(_.asRight[String])

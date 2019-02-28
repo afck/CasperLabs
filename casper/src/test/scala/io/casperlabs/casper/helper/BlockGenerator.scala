@@ -1,5 +1,6 @@
 package io.casperlabs.casper.helper
 
+import cats.syntax.ApplicativeSyntax
 import cats._
 import cats.effect.Sync
 import cats.implicits._
@@ -8,10 +9,14 @@ import io.casperlabs.blockstorage.{BlockDagRepresentation, BlockStore, IndexedBl
 import io.casperlabs.casper.Estimator.{BlockHash, Validator}
 import io.casperlabs.casper.protocol._
 import io.casperlabs.casper.util.ProtoUtil
+import io.casperlabs.casper.util.execengine.ExecEngineUtil
 import io.casperlabs.casper.util.execengine.ExecEngineUtil.StateHash
 import io.casperlabs.casper.util.rholang.ProcessedDeployUtil
 import io.casperlabs.catscontrib._
 import io.casperlabs.crypto.hash.Blake2b256
+import io.casperlabs.ipc
+import io.casperlabs.ipc.TransformEntry
+import io.casperlabs.models.BlockMetadata
 import io.casperlabs.p2p.EffectsTestInstances.LogicalTime
 import io.casperlabs.shared.{Log, Time}
 import io.casperlabs.smartcontracts.ExecutionEngineService
@@ -46,10 +51,16 @@ object BlockGenerator {
       dag: BlockDagRepresentation[F]
   ): F[(StateHash, Seq[ProcessedDeploy])] =
     for {
-      result <- InterpreterUtil
-                 .computeBlockCheckpointFromDeploys[F](b, genesis, dag)
-      Right((preStateHash, postStateHash, processedDeploys)) = result
-    } yield (postStateHash, processedDeploys.map(ProcessedDeployUtil.fromInternal))
+      result <- ExecEngineUtil
+                 .computeBlockCheckpointFromDeploys[F](
+                   b,
+                   genesis,
+                   dag,
+                   //TODO: this parameter should not be needed because the BlockDagRepresentation could hold this info
+                   (b: BlockMetadata) => Seq.empty[ipc.TransformEntry].pure[F]
+                 )
+      (preStateHash, postStateHash, processedDeploys) = result
+    } yield (postStateHash, processedDeploys)
 
   def injectPostStateHash[F[_]: Monad: BlockStore: IndexedBlockDagStorage](
       id: Int,

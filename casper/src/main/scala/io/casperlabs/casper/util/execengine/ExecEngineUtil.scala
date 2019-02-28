@@ -16,6 +16,7 @@ import io.casperlabs.shared.Log
 import io.casperlabs.smartcontracts.ExecutionEngineService
 
 object ExecEngineUtil {
+
   type StateHash = ByteString
 
   private def deploy2deploy(d: protocol.Deploy): Deploy =
@@ -47,10 +48,10 @@ object ExecEngineUtil {
     // FIXME: Implement bonds!
     Seq[Bond]().pure[F]
 
-  def computeState[F[_]: Sync: Log: ExecutionEngineService](
+  def computeDeploysCheckpoint[F[_]: Sync: Log: ExecutionEngineService](
       parents: Seq[BlockMessage],
-      dag: BlockDagRepresentation[F],
       deploys: Seq[protocol.Deploy],
+      dag: BlockDagRepresentation[F],
       //TODO: this parameter should not be needed because the BlockDagRepresentation could hold this info
       transforms: BlockMetadata => F[Seq[TransformEntry]]
   ): F[(StateHash, StateHash, Seq[ProcessedDeploy], Long)] =
@@ -179,4 +180,31 @@ object ExecEngineUtil {
         } yield result
       }
     } yield blockHashesToApply
+
+  private[casper] def computeBlockCheckpointFromDeploys[F[_]: Sync: BlockStore: Log: ExecutionEngineService](
+      b: BlockMessage,
+      genesis: BlockMessage,
+      dag: BlockDagRepresentation[F],
+      //TODO: this parameter should not be needed because the BlockDagRepresentation could hold this info
+      transforms: BlockMetadata => F[Seq[TransformEntry]]
+  ): F[(StateHash, StateHash, Seq[ProcessedDeploy])] =
+    for {
+      parents <- ProtoUtil.unsafeGetParents[F](b)
+
+      deploys = ProtoUtil.deploys(b).flatMap(_.deploy)
+
+      _ = assert(
+        parents.nonEmpty || (parents.isEmpty && b == genesis),
+        "Received a different genesis block."
+      )
+
+      result <- computeDeploysCheckpoint[F](
+                 parents,
+                 deploys,
+                 dag,
+                 transforms
+               )
+      (preStateHash, postStateHash, processedDeploys, _) = result
+    } yield (preStateHash, postStateHash, processedDeploys)
+
 }

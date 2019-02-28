@@ -323,7 +323,7 @@ class MultiParentCasperImpl[F[_]: Sync: ConnectionsCell: TransportLayer: Log: Ti
       f = (b: BlockMetadata) =>
         s.transforms.getOrElse(b.blockHash, Seq.empty[ipc.TransformEntry]).pure[F]
       stateResult <- ExecEngineUtil
-                      .computeState[F](p, dag, r, f)
+                      .computeDeploysCheckpoint(p, r, dag, f)
       (preStateHash, postStateHash, deploysForBlock, number) = stateResult
       //TODO: compute bonds properly
       newBonds = ProtoUtil.bonds(p.head)
