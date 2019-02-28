@@ -1,6 +1,6 @@
 use common::key::Key;
 use common::value::Value;
-use error::Error;
+use error::GlobalStateError;
 use gs::{DbReader, ExecutionEffect};
 use op::Op;
 use std::collections::{BTreeMap, HashMap};
@@ -24,7 +24,7 @@ impl<R: DbReader> TrackingCopy<R> {
         }
     }
 
-    pub fn get(&mut self, k: &Key) -> Result<Value, Error> {
+    pub fn get(&mut self, k: &Key) -> Result<Value, GlobalStateError> {
         if let Some(value) = self.cache.get(k) {
             return Ok(value.clone());
         }
@@ -33,18 +33,18 @@ impl<R: DbReader> TrackingCopy<R> {
         Ok(value)
     }
 
-    pub fn read(&mut self, k: Key) -> Result<Value, Error> {
+    pub fn read(&mut self, k: Key) -> Result<Value, GlobalStateError> {
         let value = self.get(&k)?;
         add(&mut self.ops, k, Op::Read);
         Ok(value)
     }
-    pub fn write(&mut self, k: Key, v: Value) -> Result<(), Error> {
+    pub fn write(&mut self, k: Key, v: Value) -> Result<(), GlobalStateError> {
         let _ = self.cache.insert(k, v.clone());
         add(&mut self.ops, k, Op::Write);
         add(&mut self.fns, k, Transform::Write(v));
         Ok(())
     }
-    pub fn add(&mut self, k: Key, v: Value) -> Result<(), Error> {
+    pub fn add(&mut self, k: Key, v: Value) -> Result<(), GlobalStateError> {
         let curr = self.get(&k)?;
         let t = match v {
             Value::Int32(i) => Ok(Transform::AddInt32(i)),
@@ -74,7 +74,7 @@ impl<R: DbReader> TrackingCopy<R> {
 mod tests {
     use common::key::Key;
     use common::value::Value;
-    use error::Error;
+    use error::{GlobalStateError, Error};
     use gs::{DbReader, TrackingCopy};
     use op::Op;
     use std::cell::Cell;
@@ -104,7 +104,7 @@ mod tests {
     }
 
     impl DbReader for CountingDb {
-        fn get(&self, _k: &Key) -> Result<Value, Error> {
+        fn get(&self, _k: &Key) -> Result<Value, GlobalStateError> {
             let count = self.count.get();
             let value = match self.value {
                 Some(ref v) => v.clone(),
@@ -116,7 +116,7 @@ mod tests {
     }
 
     impl DbReader for Rc<CountingDb> {
-        fn get(&self, k: &Key) -> Result<Value, Error> {
+        fn get(&self, k: &Key) -> Result<Value, GlobalStateError> {
             CountingDb::get(self, k)
         }
     }
