@@ -108,7 +108,10 @@ fn deploy_result_to_ipc(
             root_missing_err.set_hash(missing_root_hash.to_vec());
             Err(root_missing_err)
         }
-        Ok(ExecutionResult::Success(effects, cost)) => {
+        Ok(ExecutionResult {
+            result: Ok(effects),
+            cost,
+        }) => {
             let mut ipc_ee = execution_effect_to_ipc(effects);
             let deploy_result = {
                 let mut deploy_result_tmp = ipc::DeployResult::new();
@@ -118,7 +121,10 @@ fn deploy_result_to_ipc(
             };
             Ok(deploy_result)
         }
-        Ok(ExecutionResult::Failure(err, cost)) => {
+        Ok(ExecutionResult {
+            result: Err(err),
+            cost,
+        }) => {
             match err {
                 // TODO(mateusz.gorski): Fix error model for the storage errors.
                 // We don't have separate IPC messages for storage errors
@@ -278,7 +284,7 @@ mod tests {
         let execution_effect: ExecutionEffect =
             ExecutionEffect(HashMap::new(), input_transforms.clone());
         let cost: u64 = 123;
-        let execution_result: ExecutionResult = ExecutionResult::Success(execution_effect, cost);
+        let execution_result: ExecutionResult = ExecutionResult::success(execution_effect, cost);
         let ipc_result = deploy_result_to_ipc(Ok(execution_result));
         assert!(ipc_result.is_ok());
         let mut ipc_deploy_result = ipc_result.unwrap();
@@ -297,7 +303,7 @@ mod tests {
     }
 
     fn into_execution_failure<E: Into<EngineError>>(error: E, cost: u64) -> ExecutionResult {
-        ExecutionResult::Failure(error.into(), cost)
+        ExecutionResult::failure(error.into(), cost)
     }
 
     fn test_cost<E: Into<EngineError>>(expected_cost: u64, err: E) -> u64 {
