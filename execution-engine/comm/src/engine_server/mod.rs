@@ -94,8 +94,8 @@ fn run_deploys<A, R: DbReader, H: History<R>, E: Executor<A>, P: Preprocessor<A>
             let timestamp = deploy.timestamp;
             let nonce = deploy.nonce;
             let gas_limit = deploy.gas_limit as u64;
-            let deploy_result: Result<DeployResult, RootNotFound> =
-                deploy_result_to_ipc(engine_state.run_deploy(
+            let deploy_result: Result<DeployResult, RootNotFound> = engine_state
+                .run_deploy(
                     module_bytes,
                     address,
                     timestamp,
@@ -104,7 +104,9 @@ fn run_deploys<A, R: DbReader, H: History<R>, E: Executor<A>, P: Preprocessor<A>
                     gas_limit,
                     executor,
                     preprocessor,
-                ));
+                )
+                .map(|e| e.into())
+                .map_err(|e| e.into());
             // We want to treat RootNotFound error differently b/c it should short-circuit
             // the execution of ALL deploys within the block. This is because all of them share
             //the same prestate and all of them would fail.
@@ -119,85 +121,89 @@ fn run_deploys<A, R: DbReader, H: History<R>, E: Executor<A>, P: Preprocessor<A>
         })
 }
 
-fn deploy_result_to_ipc(
-    input: Result<ExecutionResult, storage::error::RootNotFound>,
-) -> Result<DeployResult, ipc::RootNotFound> {
-    match input {
-        Err(storage::error::RootNotFound(missing_root_hash)) => {
-            let mut root_missing_err = ipc::RootNotFound::new();
-            root_missing_err.set_hash(missing_root_hash.to_vec());
-            Err(root_missing_err)
-        }
-        Ok(ExecutionResult {
-            result: Ok(effects),
-            cost,
-        }) => {
-            let mut ipc_ee = execution_effect_to_ipc(effects);
-            let deploy_result = {
-                let mut deploy_result_tmp = ipc::DeployResult::new();
-                deploy_result_tmp.set_effects(ipc_ee);
-                deploy_result_tmp.set_cost(cost);
-                deploy_result_tmp
-            };
-            Ok(deploy_result)
-        }
-        Ok(ExecutionResult {
-            result: Err(err),
-            cost,
-        }) => {
-            match err {
-                // TODO(mateusz.gorski): Fix error model for the storage errors.
-                // We don't have separate IPC messages for storage errors
-                // so for the time being they are all reported as "wasm errors".
-                EngineError::StorageError(storage_err) => {
-                    use storage::error::Error::*;
-                    let mut err = match storage_err {
-                        KeyNotFound(key) => {
-                            let msg = format!("Key {:?} not found.", key);
-                            wasm_error(msg.to_owned())
-                        }
-                        RkvError(error_msg) => wasm_error(error_msg),
-                        TransformTypeMismatch(transform::TypeMismatch { expected, found }) => {
-                            let msg = format!(
-                                "Type mismatch. Expected {:?}, found {:?}",
-                                expected, found
-                            );
-                            wasm_error(msg)
-                        }
-                        BytesRepr(bytesrepr_err) => {
-                            let msg =
-                                format!("Error with byte representation: {:?}", bytesrepr_err);
-                            wasm_error(msg)
-                        }
-                    };
-                    err.set_cost(cost);
-                    Ok(err)
-                }
-                EngineError::PreprocessingError(err_msg) => {
-                    let mut err = wasm_error(err_msg);
-                    err.set_cost(cost);
-                    Ok(err)
-                }
-                EngineError::ExecError(exec_error) => match exec_error {
-                    ExecutionError::GasLimit => {
-                        let mut deploy_result = {
-                            let mut deploy_result_tmp = ipc::DeployResult::new();
-                            let mut deploy_error = ipc::DeployError::new();
-                            deploy_error.set_gasErr(ipc::OutOfGasError::new());
-                            deploy_result_tmp.set_error(deploy_error);
-                            deploy_result_tmp.set_cost(cost);
-                            deploy_result_tmp
+impl Into<ipc::RootNotFound> for storage::error::RootNotFound {
+    fn into(self: storage::error::RootNotFound) -> ipc::RootNotFound {
+        let storage::error::RootNotFound(missing_root_hash) = self;
+        let mut root_missing_err = ipc::RootNotFound::new();
+        root_missing_err.set_hash(missing_root_hash.to_vec());
+        root_missing_err
+    }
+}
+
+impl Into<DeployResult> for ExecutionResult {
+    fn into(self: ExecutionResult) -> DeployResult {
+        match self {
+            ExecutionResult {
+                result: Ok(effects),
+                cost,
+            } => {
+                let mut ipc_ee = execution_effect_to_ipc(effects);
+                let deploy_result = {
+                    let mut deploy_result_tmp = ipc::DeployResult::new();
+                    deploy_result_tmp.set_effects(ipc_ee);
+                    deploy_result_tmp.set_cost(cost);
+                    deploy_result_tmp
+                };
+                deploy_result
+            }
+            ExecutionResult {
+                result: Err(err),
+                cost,
+            } => {
+                match err {
+                    // TODO(mateusz.gorski): Fix error model for the storage errors.
+                    // We don't have separate IPC messages for storage errors
+                    // so for the time being they are all reported as "wasm errors".
+                    EngineError::StorageError(storage_err) => {
+                        use storage::error::Error::*;
+                        let mut err = match storage_err {
+                            KeyNotFound(key) => {
+                                let msg = format!("Key {:?} not found.", key);
+                                wasm_error(msg.to_owned())
+                            }
+                            RkvError(error_msg) => wasm_error(error_msg),
+                            TransformTypeMismatch(transform::TypeMismatch { expected, found }) => {
+                                let msg = format!(
+                                    "Type mismatch. Expected {:?}, found {:?}",
+                                    expected, found
+                                );
+                                wasm_error(msg)
+                            }
+                            BytesRepr(bytesrepr_err) => {
+                                let msg =
+                                    format!("Error with byte representation: {:?}", bytesrepr_err);
+                                wasm_error(msg)
+                            }
                         };
-                        Ok(deploy_result)
-                    }
-                    // TODO(mateusz.gorski): Be more specific about execution errors
-                    other => {
-                        let msg = format!("{:?}", other);
-                        let mut err = wasm_error(msg);
                         err.set_cost(cost);
-                        Ok(err)
+                        err
                     }
-                },
+                    EngineError::PreprocessingError(err_msg) => {
+                        let mut err = wasm_error(err_msg);
+                        err.set_cost(cost);
+                        err
+                    }
+                    EngineError::ExecError(exec_error) => match exec_error {
+                        ExecutionError::GasLimit => {
+                            let mut deploy_result = {
+                                let mut deploy_result_tmp = ipc::DeployResult::new();
+                                let mut deploy_error = ipc::DeployError::new();
+                                deploy_error.set_gasErr(ipc::OutOfGasError::new());
+                                deploy_result_tmp.set_error(deploy_error);
+                                deploy_result_tmp.set_cost(cost);
+                                deploy_result_tmp
+                            };
+                            deploy_result
+                        }
+                        // TODO(mateusz.gorski): Be more specific about execution errors
+                        other => {
+                            let msg = format!("{:?}", other);
+                            let mut err = wasm_error(msg);
+                            err.set_cost(cost);
+                            err
+                        }
+                    },
+                }
             }
         }
     }
@@ -263,7 +269,6 @@ pub fn new<E: ExecutionEngineService + Sync + Send + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use super::deploy_result_to_ipc;
     use super::wasm_error;
     use common::key::Key;
     use execution_engine::engine::{Error as EngineError, ExecutionResult};
@@ -288,9 +293,8 @@ mod tests {
     #[test]
     fn deploy_result_to_ipc_missing_root() {
         let root_hash = [1u8; 32];
-        let result = deploy_result_to_ipc(Err(storage::error::RootNotFound(root_hash)));
-        assert!(result.is_err());
-        let ipc_missing_hash = result.unwrap_err().take_hash();
+        let mut result: super::ipc::RootNotFound = storage::error::RootNotFound(root_hash).into();
+        let ipc_missing_hash = result.take_hash();
         assert_eq!(root_hash.to_vec(), ipc_missing_hash);
     }
 
@@ -305,9 +309,7 @@ mod tests {
             ExecutionEffect(HashMap::new(), input_transforms.clone());
         let cost: u64 = 123;
         let execution_result: ExecutionResult = ExecutionResult::success(execution_effect, cost);
-        let ipc_result = deploy_result_to_ipc(Ok(execution_result));
-        assert!(ipc_result.is_ok());
-        let mut ipc_deploy_result = ipc_result.unwrap();
+        let mut ipc_deploy_result: super::ipc::DeployResult = execution_result.into();
         assert_eq!(ipc_deploy_result.get_cost(), cost);
 
         // Extract transform map from the IPC message and parse it back to the domain
@@ -316,7 +318,7 @@ mod tests {
             let ipc_effects_tnfs = ipc_effects.take_transform_map().into_vec();
             ipc_effects_tnfs
                 .iter()
-                .map(transform_entry_to_key_transform)
+                .map(|e| e.into())
                 .collect()
         };
         assert_eq!(&input_transforms, &ipc_transforms);
@@ -328,9 +330,8 @@ mod tests {
 
     fn test_cost<E: Into<EngineError>>(expected_cost: u64, err: E) -> u64 {
         let execution_failure = into_execution_failure(err, expected_cost);
-        let ipc_deploy_result = deploy_result_to_ipc(Ok(execution_failure));
-        assert!(ipc_deploy_result.is_ok());
-        ipc_deploy_result.unwrap().get_cost()
+        let ipc_deploy_result: super::ipc::DeployResult = execution_failure.into();
+        ipc_deploy_result.get_cost()
     }
 
     #[test]
