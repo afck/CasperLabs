@@ -68,7 +68,7 @@ fn ipc_transform_to_transform(tr: &super::ipc::Transform) -> storage::transform:
 }
 
 /// Transforms domain storage::transform::Transform into gRPC Transform.
-fn transform_to_ipc(tr: &storage::transform::Transform) -> super::ipc::Transform {
+fn transform_to_ipc(tr: storage::transform::Transform) -> super::ipc::Transform {
     let mut t = super::ipc::Transform::new();
     match tr {
         storage::transform::Transform::Identity => {
@@ -79,7 +79,7 @@ fn transform_to_ipc(tr: &storage::transform::Transform) -> super::ipc::Transform
             let mut tv = super::ipc::Value::new();
             match v {
                 common::value::Value::Int32(i) => {
-                    tv.set_integer(*i);
+                    tv.set_integer(i);
                 }
                 common::value::Value::ByteArray(arr) => {
                     tv.set_byte_arr(arr.clone());
@@ -101,7 +101,7 @@ fn transform_to_ipc(tr: &storage::transform::Transform) -> super::ipc::Transform
                     let named_key = {
                         let mut nk = super::ipc::NamedKey::new();
                         nk.set_name(name.to_string());
-                        nk.set_key(key.into());
+                        nk.set_key((&key).into());
                         nk
                     };
                     tv.set_named_key(named_key);
@@ -111,13 +111,13 @@ fn transform_to_ipc(tr: &storage::transform::Transform) -> super::ipc::Transform
                     acc.set_pub_key(account.pub_key().to_vec());
                     // TODO update proto; change nonce to u64
                     acc.set_nonce(account.nonce() as i64);
-                    let urefs = urefs_map_to_ipc_vec(account.urefs_lookup());
+                    let urefs = URefMap(account.get_urefs_lookup()).into();
                     acc.set_known_urefs(protobuf::RepeatedField::from_vec(urefs));
                     tv.set_account(acc);
                 }
                 common::value::Value::Contract { bytes, known_urefs } => {
                     let mut contr = super::ipc::Contract::new();
-                    let urefs = urefs_map_to_ipc_vec(known_urefs);
+                    let urefs = URefMap(known_urefs).into();
                     contr.set_body(bytes.clone());
                     contr.set_known_urefs(protobuf::RepeatedField::from_vec(urefs));
                     tv.set_contract(contr);
@@ -128,12 +128,12 @@ fn transform_to_ipc(tr: &storage::transform::Transform) -> super::ipc::Transform
         }
         storage::transform::Transform::AddInt32(i) => {
             let mut add = super::ipc::TransformAddInt32::new();
-            add.set_value(*i);
+            add.set_value(i);
             t.set_add_i32(add);
         }
-        storage::transform::Transform::AddKeys(keys) => {
+        storage::transform::Transform::AddKeys(keys_map) => {
             let mut add = super::ipc::TransformAddKeys::new();
-            let keys = urefs_map_to_ipc_vec(keys);
+            let keys = URefMap(keys_map).into();
             add.set_value(protobuf::RepeatedField::from_vec(keys));
             t.set_add_keys(add);
         }
@@ -166,17 +166,19 @@ impl From<&[super::ipc::NamedKey]> for URefMap {
     }
 }
 
-// Helper method for turning BTreeMap of Keys into Vec of gRPC NamedKey.
-fn urefs_map_to_ipc_vec(urefs: &BTreeMap<String, common::key::Key>) -> Vec<super::ipc::NamedKey> {
-    urefs
-        .iter()
-        .map(|(n, k)| {
-            let mut nk = super::ipc::NamedKey::new();
-            nk.set_name(n.to_string());
-            nk.set_key(k.into());
-            nk
-        })
-        .collect()
+impl From<URefMap> for Vec<super::ipc::NamedKey> {
+    fn from(uref_map: URefMap) -> Vec<super::ipc::NamedKey> {
+        uref_map
+            .0
+            .into_iter()
+            .map(|(n, k)| {
+                let mut nk = super::ipc::NamedKey::new();
+                nk.set_name(n.to_string());
+                nk.set_key((&k).into());
+                nk
+            })
+            .collect()
+    }
 }
 
 impl From<&common::key::Key> for super::ipc::Key {
@@ -271,11 +273,11 @@ pub fn execution_effect_to_ipc(ee: storage::gs::ExecutionEffect) -> super::ipc::
             })
             .collect();
     let ipc_tran: Vec<super::ipc::TransformEntry> =
-        ee.1.iter()
+        ee.1.into_iter()
             .map(|(k, t)| {
                 let mut tr_entry = super::ipc::TransformEntry::new();
                 let ipc_tr = transform_to_ipc(t);
-                tr_entry.set_key(k.into());
+                tr_entry.set_key((&k).into());
                 tr_entry.set_transform(ipc_tr);
                 tr_entry
             })
