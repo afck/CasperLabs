@@ -112,7 +112,7 @@ fn transform_to_ipc(tr: &storage::transform::Transform) -> super::ipc::Transform
                 common::value::Value::Acct(account) => {
                     let mut acc = super::ipc::Account::new();
                     acc.set_pub_key(account.pub_key().to_vec());
-                    //TODO update proto; change nonce to u64
+                    // TODO update proto; change nonce to u64
                     acc.set_nonce(account.nonce() as i64);
                     let urefs = urefs_map_to_ipc_vec(account.urefs_lookup());
                     acc.set_known_urefs(protobuf::RepeatedField::from_vec(urefs));
@@ -215,7 +215,7 @@ fn ipc_to_key(ipc_key: &super::ipc::Key) -> common::key::Key {
         arr.clone_from_slice(&ipc_key.get_uref().uref);
         common::key::Key::URef(arr)
     } else {
-        //TODO make this Result::Err instead of panic
+        // TODO make this Result::Err instead of panic
         panic!(format!(
             "ipc Key couldn't be parsed to any Key: {:?}",
             ipc_key
