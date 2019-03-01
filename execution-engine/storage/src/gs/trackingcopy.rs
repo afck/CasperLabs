@@ -74,7 +74,7 @@ impl<R: DbReader> TrackingCopy<R> {
 mod tests {
     use common::key::Key;
     use common::value::Value;
-    use error::{GlobalStateError, Error};
+    use error::{Error, GlobalStateError};
     use gs::{DbReader, TrackingCopy};
     use op::Op;
     use std::cell::Cell;

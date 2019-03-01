@@ -315,10 +315,7 @@ mod tests {
         let ipc_transforms: HashMap<Key, Transform> = {
             let mut ipc_effects = ipc_deploy_result.take_effects();
             let ipc_effects_tnfs = ipc_effects.take_transform_map().into_vec();
-            ipc_effects_tnfs
-                .iter()
-                .map(|e| e.into())
-                .collect()
+            ipc_effects_tnfs.iter().map(|e| e.into()).collect()
         };
         assert_eq!(&input_transforms, &ipc_transforms);
     }
