@@ -34,12 +34,12 @@ TAG = os.environ.get(
     "DRONE_BUILD_NUMBER",
     None)
 if TAG is None:
-    TAG = "latest"
+    TAG = "test"
 else:
     TAG = "DRONE-" + TAG
 DEFAULT_IMAGE = os.environ.get(
     "DEFAULT_IMAGE",
-    "casperlabs-integration-testing:{}".format(TAG))
+    "casperlabs/node:{}".format(TAG))
 
 casperlabsnode_binary = '/opt/docker/bin/bootstrap'
 casperlabsnode_directory = "/root/.casperlabs"
