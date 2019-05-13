@@ -11,6 +11,7 @@ use history::trie_store::operations::{read, write, ReadResult, WriteResult};
 use history::trie_store::{Transaction, TransactionSource, TrieStore};
 use history::{commit, CommitResult, History};
 use shared::newtypes::Blake2bHash;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -52,13 +53,22 @@ impl InMemoryGlobalState {
         }
     }
 
-    /// Creates a state from a given set of [`Key`](common::key::key), [`Value`](common::value::Value) pairs
-    pub fn from_pairs(pairs: &[(Key, Value)]) -> Result<Self, error::Error> {
+    /// Creates a state from a given set of [`Key`](common::key::key),
+    /// [`Value`](common::value::Value) pairs
+    pub fn from_pairs<I, K, V>(pairs: I) -> Result<Self, error::Error>
+    where
+        I: IntoIterator,
+        I::Item: Borrow<(K, V)>,
+        K: Borrow<Key>,
+        V: Borrow<Value>,
+    {
         let mut ret = InMemoryGlobalState::empty()?;
         {
             let mut txn = ret.environment.create_read_write_txn()?;
             let mut current_root = ret.root_hash;
-            for (key, value) in pairs {
+            for item in pairs {
+                let (k, v) = item.borrow();
+                let (key, value) = (k.borrow(), v.borrow());
                 match write::<_, _, _, InMemoryTrieStore, in_memory::Error>(
                     &mut txn,
                     &ret.store,
@@ -178,9 +188,7 @@ mod tests {
         InMemoryGlobalState::from_pairs(
             &TEST_PAIRS
                 .iter()
-                .cloned()
                 .map(|TestPair { key, value }| (key, value))
-                .collect::<Vec<(Key, Value)>>(),
         )
         .unwrap()
     }
