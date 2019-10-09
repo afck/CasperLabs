@@ -9,6 +9,7 @@ mod error;
 mod queue;
 mod stakes;
 
+use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -117,25 +118,51 @@ fn unbond<Q: QueueProvider, S: StakesProvider>(
 }
 
 /// Removes all due requests from the queues and applies them.
-fn step<Q: QueueProvider, S: StakesProvider>(timestamp: BlockTime) -> Result<Vec<QueueEntry>> {
+fn step<Q: QueueProvider, S: StakesProvider>(
+    timestamp: BlockTime,
+    equivocators: BTreeSet<PublicKey>,
+) -> Result<Vec<QueueEntry>> {
     let mut bonding_queue = Q::read_bonding();
     let mut unbonding_queue = Q::read_unbonding();
 
+    // Remove all equivocators from the unbonding queue.
+    let mut unbonding_equivocators = false;
+    unbonding_queue.0.retain(|entry| {
+        let is_equivocator = equivocators.contains(&entry.validator);
+        unbonding_equivocators = unbonding_equivocators || is_equivocator;
+        !is_equivocator
+    });
+
+    // Get all bonding and unbonding requests that are due.
     let bonds = bonding_queue.pop_due(BlockTime(timestamp.0.saturating_sub(BOND_DELAY)));
     let unbonds = unbonding_queue.pop_due(BlockTime(timestamp.0.saturating_sub(UNBOND_DELAY)));
 
-    if !unbonds.is_empty() {
+    // If the unbonding queue has changed, write it.
+    if unbonding_equivocators || !unbonds.is_empty() {
         Q::write_unbonding(&unbonding_queue);
     }
 
+    // If the bonding queue has changed, write it.
     if !bonds.is_empty() {
         Q::write_bonding(&bonding_queue);
-        let mut stakes = S::read()?;
-        for entry in bonds {
-            stakes.bond(&entry.validator, entry.amount);
-        }
-        S::write(&stakes);
+    } else if equivocators.is_empty() {
+        return Ok(unbonds); // No equivocators and no bonds, so we are done.
     }
+
+    let mut stakes = S::read()?;
+
+    // Remove all equivocators' stakes.
+    for equivocator in equivocators {
+        stakes.0.remove(&equivocator);
+    }
+
+    // Add all newly bonded validators to the stakes.
+    for entry in bonds {
+        stakes.bond(&entry.validator, entry.amount);
+    }
+
+    // Persist the updated stakes map.
+    S::write(&stakes);
 
     Ok(unbonds)
 }
@@ -266,7 +293,8 @@ pub fn delegate() {
 
             // TODO: Remove this and set nonzero delays once the system calls `step` in each
             // block.
-            let unbonds = step::<QueueLocal, ContractStakes>(timestamp).unwrap_or_revert();
+            let unbonds =
+                step::<QueueLocal, ContractStakes>(timestamp, BTreeSet::new()).unwrap_or_revert();
             for entry in unbonds {
                 let _ = contract_api::transfer_from_purse_to_account(
                     pos_purse,
@@ -286,7 +314,8 @@ pub fn delegate() {
 
             // TODO: Remove this and set nonzero delays once the system calls `step` in each
             // block.
-            let unbonds = step::<QueueLocal, ContractStakes>(timestamp).unwrap_or_revert();
+            let unbonds =
+                step::<QueueLocal, ContractStakes>(timestamp, BTreeSet::new()).unwrap_or_revert();
             for entry in unbonds {
                 contract_api::transfer_from_purse_to_account(
                     pos_purse,
@@ -298,8 +327,12 @@ pub fn delegate() {
         }
         // Type of this method: `fn step()`
         "step" => {
+            let equivocators = contract_api::get_arg(1)
+                .unwrap_or_revert_with(Error::MissingArgument)
+                .unwrap_or_revert_with(Error::InvalidArgument);
             // This is called by the system in every block.
-            let unbonds = step::<QueueLocal, ContractStakes>(timestamp).unwrap_or_revert();
+            let unbonds =
+                step::<QueueLocal, ContractStakes>(timestamp, equivocators).unwrap_or_revert();
 
             // Mateusz: Moved outside of `step` function so that it [step] can be unit
             // tested.
@@ -363,6 +396,7 @@ pub extern "C" fn call() {
 
 #[cfg(test)]
 mod tests {
+    use alloc::collections::BTreeSet;
     use std::cell::RefCell;
     use std::iter;
 
@@ -378,6 +412,7 @@ mod tests {
 
     const KEY1: [u8; 32] = [1; 32];
     const KEY2: [u8; 32] = [2; 32];
+    const KEY3: [u8; 32] = [3; 32];
 
     thread_local! {
         static BONDING: RefCell<Queue> = RefCell::new(Queue(Default::default()));
@@ -433,20 +468,30 @@ mod tests {
     fn test_bond_step_unbond() {
         bond::<TestQueues, TestStakes>(U512::from(500), PublicKey::new(KEY2), BlockTime(1))
             .expect("bond validator 2");
+        bond::<TestQueues, TestStakes>(U512::from(500), PublicKey::new(KEY3), BlockTime(1))
+            .expect("bond validator 3");
 
         // Bonding becomes effective only after the delay.
         assert_stakes(&[(KEY1, 1_000)]);
-        step::<TestQueues, TestStakes>(BlockTime(BOND_DELAY)).expect("step 1");
+        step::<TestQueues, TestStakes>(BlockTime(BOND_DELAY), BTreeSet::new()).expect("step 1");
         assert_stakes(&[(KEY1, 1_000)]);
-        step::<TestQueues, TestStakes>(BlockTime(1 + BOND_DELAY)).expect("step 2");
-        assert_stakes(&[(KEY1, 1_000), (KEY2, 500)]);
+        step::<TestQueues, TestStakes>(BlockTime(1 + BOND_DELAY), BTreeSet::new()).expect("step 2");
+        assert_stakes(&[(KEY1, 1_000), (KEY2, 500), (KEY3, 500)]);
 
-        unbond::<TestQueues, TestStakes>(Some(U512::from(500)), PublicKey::new(KEY1), BlockTime(2))
+        // Equivocators are removed from the stakes and don't get their deposit back.
+        let equivocators = iter::once(PublicKey::new(KEY3)).collect();
+        let unbonds = step::<TestQueues, TestStakes>(BlockTime(2 + BOND_DELAY), equivocators)
+            .expect("step 3");
+        assert_stakes(&[(KEY1, 1_000), (KEY2, 500)]);
+        assert!(unbonds.is_empty(), "Unbonds after step 3: {:?}", unbonds);
+
+        unbond::<TestQueues, TestStakes>(Some(U512::from(500)), PublicKey::new(KEY1), BlockTime(9))
             .expect("partly unbond validator 1");
 
         // Unbonding becomes effective immediately.
         assert_stakes(&[(KEY1, 500), (KEY2, 500)]);
-        step::<TestQueues, TestStakes>(BlockTime(2 + UNBOND_DELAY)).expect("step 3");
+        step::<TestQueues, TestStakes>(BlockTime(9 + UNBOND_DELAY), BTreeSet::new())
+            .expect("step 4");
         assert_stakes(&[(KEY1, 500), (KEY2, 500)]);
     }
 }
