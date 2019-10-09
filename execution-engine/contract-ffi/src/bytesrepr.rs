@@ -1,5 +1,4 @@
-use super::alloc::collections::BTreeMap;
-use super::alloc::collections::TryReserveError;
+use super::alloc::collections::{BTreeMap, BTreeSet, TryReserveError};
 use super::alloc::string::{String, ToString};
 use super::alloc::vec::Vec;
 
@@ -450,6 +449,47 @@ where
     }
 }
 
+impl<T> ToBytes for BTreeSet<T>
+where
+    T: ToBytes,
+{
+    fn to_bytes(&self) -> Result<Vec<u8>, Error> {
+        let num = self.len() as u32;
+        let bytes = self
+            .iter()
+            .map(move |item| item.to_bytes().map_err(Error::from))
+            // Collect into a single Result of bytes (if successful)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten();
+
+        let (lower_bound, _upper_bound) = bytes.size_hint();
+        if lower_bound >= u32::max_value() as usize - U32_SIZE {
+            return Err(Error::OutOfMemoryError);
+        }
+        let mut result: Vec<u8> = Vec::with_capacity(U32_SIZE + lower_bound);
+        result.append(&mut num.to_bytes()?);
+        result.extend(bytes);
+        Ok(result)
+    }
+}
+
+impl<T> FromBytes for BTreeSet<T>
+where
+    T: FromBytes + Ord,
+{
+    fn from_bytes(bytes: &[u8]) -> Result<(Self, &[u8]), Error> {
+        let (num, mut stream): (u32, &[u8]) = FromBytes::from_bytes(bytes)?;
+        let mut result = BTreeSet::new();
+        for _ in 0..num {
+            let (item, rem): (T, &[u8]) = FromBytes::from_bytes(stream)?;
+            result.insert(item);
+            stream = rem;
+        }
+        Ok((result, stream))
+    }
+}
+
 impl ToBytes for &str {
     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         if self.len() >= u32::max_value() as usize - U32_SIZE {
@@ -533,7 +573,7 @@ mod proptests {
     // Bring the macros and other important things into scope.
     use crate::gens::*;
     use crate::test_utils::test_serialization_roundtrip;
-    use proptest::collection::vec;
+    use proptest::collection::{btree_set, vec};
     use proptest::prelude::*;
 
     proptest! {
@@ -661,6 +701,11 @@ mod proptests {
         #[test]
         fn test_sem_ver(sem_ver in sem_ver_arb()) {
             assert!(test_serialization_roundtrip(&sem_ver))
+        }
+
+        #[test]
+        fn test_btree_set(set in btree_set(public_key_arb(), 0..10)) {
+            assert!(test_serialization_roundtrip(&set))
         }
     }
 }
